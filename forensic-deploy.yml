@@ -1,0 +1,658 @@
+Description: >
+  This CFN template deploys a VPC, with  public, private, reseved & Transit subnets spread 
+  across three Availabilty Zones. It deploys an Internet Gateway, with a default 
+  route on the public subnets. It deploys three NAT Gateways (one in each AZ), 
+  and default routes for them in the Transit subnets. It will create a linux based
+  and windows based Ec2 instance with default credentials for forensic analysis.
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names 
+    Type: String
+
+  InstanceType:
+    Description: Bastion EC2 instance type (has default, AllowedValues)
+    Type: String
+    Default: t2.large
+    AllowedValues: [t2.large, t2.xlarge, t2.2xlarge,
+      t3.nano, t3.micro, t3.small, t3.medium, ]
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  S3BucketName:
+    Description: Enter the name of the incident, to store the evidence here.
+    Type: String
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+
+  PublicSubnets:
+    Description: The following listed IP subnets were public Subnets.
+    Type: CommaDelimitedList
+    Default: 10.21.187.0/26, 10.21.187.64/26, 10.21.187.128/26
+
+  PrivateSubnets:
+    Description: The following listed IP subnets were private Subnets.
+    Type: CommaDelimitedList
+    Default: 10.21.184.0/25, 10.21.184.128/25, 10.21.185.0/25
+
+  ReservedSubnets:
+    Description: The following listed IP subnets were Reserved Subnets.
+    Type: CommaDelimitedList
+    Default: 10.21.185.128/25, 10.21.186.0/25, 10.21.186.128/25
+
+  TransitSubnets:
+    Description: The following listed IP subnets were Transit Subnets.
+    Type: CommaDelimitedList
+    Default: 10.21.187.192/28, 10.21.187.208/28, 10.21.187.224/28
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref S3BucketName
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Principal:
+              Service: ec2.amazonaws.com
+            Effect: Allow
+            Sid: ''
+      Policies:
+        - PolicyName: AuthenticatedS34EC2
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - 's3:*'
+                Resource: !Sub 'arn:aws:s3:::*'
+                Effect: Allow
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref InstanceRole
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.21.184.0/22
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1a
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Select [0, !Ref PublicSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} PublicSubnet-AZ-1
+
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1b
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Select [1, !Ref PublicSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} PublicSubnet-AZ-2
+      
+  PublicSubnetAZ3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1c
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Select [2, !Ref PublicSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} PublicSubnet-AZ-3
+
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1a
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [0, !Ref PrivateSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} PrivateSubnet-AZ-1
+
+  PrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1b
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [1, !Ref PrivateSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} PrivateSubnet-AZ-2
+      
+  PrivateSubnetAZ3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1c
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [2, !Ref PrivateSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} PrivateSubnet-AZ-3
+
+  ReservedSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1a
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [0, !Ref ReservedSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} ReservedSubnet-AZ-1
+
+  ReservedSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1b
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [1, !Ref ReservedSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} ReservedSubnet-AZ-2
+      
+  ReservedSubnetAZ3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1c
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [2, !Ref ReservedSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} ReservedSubnet-AZ-3
+
+  TransitSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1a
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [0, !Ref TransitSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} TransitSubnet-AZ-1
+
+  TransitSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1b
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [1, !Ref TransitSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} TransitSubnet-AZ-2
+      
+  TransitSubnetAZ3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: us-east-1c
+      MapPublicIpOnLaunch: false
+      CidrBlock: !Select [2, !Ref TransitSubnets]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} TransitSubnet-AZ-3
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  NatGatewayEIP1:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} NatGatewayEIP1
+
+  NatGatewayEIP2:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} NatGatewayEIP2
+
+  NatGatewayEIP3:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} NatGatewayEIP3
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP1.AllocationId
+      SubnetId: !Ref PublicSubnetAZ1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} NatGateway1
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP2.AllocationId
+      SubnetId: !Ref PublicSubnetAZ2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} NatGateway2
+
+  NatGateway3:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP3.AllocationId
+      SubnetId: !Ref PublicSubnetAZ3
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} NatGateway3
+
+# Public RouteTable for all the three public subnets pointing at Internetgateway.
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public-Route-Table
+    
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      
+  PublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ1
+
+  PublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ2
+
+  PublicSubnetRouteTableAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetAZ3
+           
+
+# - Private Route table - 1 For both the Private & Reserved - 1 Subnets.
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private-Route-Table-1
+    
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0  
+      GatewayId: !Ref InternetGateway  
+      
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnetAZ1
+
+  ReservedSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref ReservedSubnetAZ1
+
+# - Private Route table - 2 For both the Private & Reserved - 2 Subnets.
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private-Route-Table-2
+    
+  PrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0  
+      GatewayId: !Ref InternetGateway  
+      
+  PrivateSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnetAZ2
+
+  ReservedSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref ReservedSubnetAZ2
+
+# - Private Route table - 3 For both the Private & Reserved - 3 Subnets.
+
+  PrivateRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private-Route-Table-3
+    
+  PrivateRoute3:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0  
+      GatewayId: !Ref InternetGateway  
+      
+  PrivateSubnetRouteTableAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      SubnetId: !Ref PrivateSubnetAZ3
+
+  ReservedSubnetRouteTableAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      SubnetId: !Ref ReservedSubnetAZ3
+  
+# - Transit Route table - 1 for Trasit Subnet-1 which includes NAT Gateway - 1.
+
+  TransitRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Transit-Route-Table-1
+    
+  TransitRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref TransitRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  TransitSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref TransitRouteTable1
+      SubnetId: !Ref TransitSubnetAZ1
+
+# - Transit Route table - 2 for Trasit Subnet-2 which includes NAT Gateway - 2.
+
+  TransitRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Transit-Route-Table-2
+    
+  TransitRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref TransitRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  TransitSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref TransitRouteTable2
+      SubnetId: !Ref TransitSubnetAZ2
+
+# - Transit Route table - 3 for Trasit Subnet-3 which includes NAT Gateway - 3.
+
+  TransitRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Transit-Route-Table-3
+    
+  TransitRoute3:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref TransitRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway3
+
+  TransitSubnetRouteTableAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref TransitRouteTable3
+      SubnetId: !Ref TransitSubnetAZ3
+#################################################S3-Gateway-Endpoint-Configuration##################################
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTable1
+        - !Ref PrivateRouteTable2
+        - !Ref PrivateRouteTable3
+        - !Ref TransitRouteTable1
+        - !Ref TransitRouteTable2
+        - !Ref TransitRouteTable3
+      ServiceName: com.amazonaws.us-east-1.s3
+
+#################################################HTTPS-Endpoint-SecurityGroup-##################################
+  HTTPSEndpointSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Endable Https access to Endpoint services.
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.21.184.0/22
+      Tags:
+        - Key: Name
+          Value: HTTPSEndpointSG
+##############################################Security Groups for Linux, Windows Workstations#########################
+  LinuxBastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: This was the securtigy group developed for Linux/Shift Workstation from localhost, Maui & Singapore IP ranges
+      VpcId: !Ref VPC      
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:  132.188.0.0/16
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 203.202.234.0/24
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.21.184.0/22
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp:  132.188.0.0/16
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 203.202.234.0/24
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 10.21.184.0/22
+      Tags:
+        - Key: Name
+          Value:  LinuxBastionSG
+
+  WindowsBastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: This was the securtigy group developed for windows Workstation from localhost, Maui & Singapore IP ranges
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp:  132.188.0.0/16
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 203.202.234.0/24
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 10.21.184.0/22
+      Tags:
+        - Key: Name
+          Value:  WindowsBastionSG
+
+  SSMMessagesInterface:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: com.amazonaws.us-east-1.ssmmessages
+      VpcId: !Ref VPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !GetAtt HTTPSEndpointSG.GroupId
+      SubnetIds:
+        - !Ref PublicSubnetAZ1
+        - !Ref PublicSubnetAZ2
+        - !Ref PublicSubnetAZ3
+    DependsOn:
+      - "NatGateway3"
+  
+  SSMInterface:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: com.amazonaws.us-east-1.ssm
+      VpcId: !Ref VPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !GetAtt HTTPSEndpointSG.GroupId
+      SubnetIds:
+        - !Ref PublicSubnetAZ1
+        - !Ref PublicSubnetAZ2
+        - !Ref PublicSubnetAZ3
+    DependsOn:
+      - "NatGateway3"
+
+  Ec2MessagesInterface:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: com.amazonaws.us-east-1.ec2messages
+      VpcId: !Ref VPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !GetAtt HTTPSEndpointSG.GroupId
+      SubnetIds:
+        - !Ref PublicSubnetAZ1
+        - !Ref PublicSubnetAZ2
+        - !Ref PublicSubnetAZ3
+    DependsOn:
+      - "NatGateway3"
+      
+##############################Windows Ec2 Instance#################################
+
+  WinEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: ami-08e0bfcc7dde3b633
+      AvailabilityZone: us-east-1a
+      IamInstanceProfile: !Ref InstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: 0
+          GroupSet:
+            - Ref: "WindowsBastionSG"
+          SubnetId: !Ref PublicSubnetAZ1
+      Tags:
+        - Key: Name
+          Value: Windows-10
+
+####################Linux Ec2 Instance####################
+
+  LinuxEc2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: ami-051decee71207c048
+      AvailabilityZone: us-east-1a
+      IamInstanceProfile: !Ref InstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: 0
+          GroupSet:
+            - Ref: "LinuxBastionSG"
+          SubnetId: !Ref PublicSubnetAZ1
+      Tags:
+        - Key: Name
+          Value: SIFT-Workstation
